@@ -387,3 +387,31 @@ async def test_refresh_all_halts_on_rate_limit(
     # skipped bucket, no per-asset fallback was attempted.
     assert result["refreshed"] == 0
     assert result["skipped"] == 2
+
+
+def test_minor_unit_currency_normalization():
+    from app.providers.market_price import _normalize_currency_and_price
+
+    # British pence (GBp / GBX) -> GBP
+    curr, price = _normalize_currency_and_price("GBp", 705.50)
+    assert curr == "GBP"
+    assert round(price, 4) == 7.055
+
+    curr, price = _normalize_currency_and_price("GBX", 705.50)
+    assert curr == "GBP"
+    assert round(price, 4) == 7.055
+
+    # South African cents (ZAc / ZAX) -> ZAR
+    curr, price = _normalize_currency_and_price("ZAc", 1500.0)
+    assert curr == "ZAR"
+    assert round(price, 2) == 15.0
+
+    # Israeli Agora (ILA) -> ILS
+    curr, price = _normalize_currency_and_price("ILA", 250.0)
+    assert curr == "ILS"
+    assert round(price, 2) == 2.50
+
+    # Normal currency unchanged
+    curr, price = _normalize_currency_and_price("USD", 150.0)
+    assert curr == "USD"
+    assert price == 150.0

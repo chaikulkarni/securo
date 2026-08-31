@@ -41,13 +41,23 @@ logger = logging.getLogger(__name__)
 # These are not valid ISO 4217 codes and, if kept raw, produce 100x-wrong
 # valuations. Same table Sure uses (see app/models/provider/yahoo_finance.rb).
 _MINOR_UNIT_CURRENCIES: dict[str, tuple[str, float]] = {
-    "GBp": ("GBP", 0.01),  # British pence → pounds (e.g. IITU.L)
+    "GBp": ("GBP", 0.01),  # British pence → pounds (e.g. IITU.L, FWRG.L)
+    "GBX": ("GBP", 0.01),
+    "gbp": ("GBP", 0.01),
+    "gbx": ("GBP", 0.01),
     "ZAc": ("ZAR", 0.01),  # South African cents → rand (e.g. JSE.JO)
+    "ZAX": ("ZAR", 0.01),
+    "zac": ("ZAR", 0.01),
+    "zax": ("ZAR", 0.01),
+    "ILA": ("ILS", 0.01),  # Israeli Agora → Shekel
+    "ila": ("ILS", 0.01),
 }
 
 
 def _normalize_currency_and_price(currency: str, price: float) -> tuple[str, float]:
-    conv = _MINOR_UNIT_CURRENCIES.get(currency)
+    if not currency:
+        return currency, price
+    conv = _MINOR_UNIT_CURRENCIES.get(currency) or _MINOR_UNIT_CURRENCIES.get(currency.strip())
     if conv is None:
         return currency, price
     code, multiplier = conv
@@ -157,29 +167,16 @@ class YFinanceProvider(MarketPriceProvider):
             )
         return matches
 
-    # Practical cap per `yf.download` request. Yahoo accepts more but starts
-    # silently dropping symbols beyond ~100 in community reports — we chunk
-    # above this to keep the success rate high.
-    _BATCH_CHUNK_SIZE = 100
+    # Cap concurrent requests per chunk
+    _BATCH_CHUNK_SIZE = 50
 
     async def get_latest_prices(self, symbols: list[str]) -> dict[str, Optional[Decimal]]:
-        """One HTTP request per ~100 tickers via ``yfinance.download``.
+        """Batch-fetch latest prices with accurate currency normalization.
 
-        Much cheaper than looping ``get_quote`` for a scheduled refresh — a
-        portfolio of 50 market-priced assets goes from 50 calls to 1. The
-        tradeoff: ``download`` returns prices only (no currency/name/etc.).
-        That's fine here because ``Asset.currency`` is already cached from
-        creation time; we just update the price and let ``current_value``
-        recompute from ``units × last_price``.
-
-        Note on minor-unit currencies (GBp, ZAc on LSE/JSE): those are
-        normalized to GBP/ZAR ×0.01 at creation (via ``get_quote``), but
-        on refresh we only get the raw trading-currency close. The batch
-        preserves the same unit as the upstream quote, so internal
-        consistency is maintained as long as the asset's stored currency
-        matches the ticker's reporting unit. If Yahoo changes a listing's
-        reporting unit mid-stream the price will appear off by 100× — rare
-        enough to address reactively rather than pre-emptively.
+        Instead of raw unnormalized download which drops currency metadata
+        and inflates minor-unit prices (e.g. LSE GBp pence -> GBP, JSE ZAc cents -> ZAR),
+        fetches quotes concurrently with fast_info to guarantee correct currency
+        normalization across all exchanges.
         """
         if not symbols:
             return {}
@@ -187,16 +184,22 @@ class YFinanceProvider(MarketPriceProvider):
         if not unique:
             return {}
 
-        out: dict[str, Optional[Decimal]] = {s: None for s in unique}
+        async def _fetch_one(sym: str) -> tuple[str, Optional[Decimal]]:
+            try:
+                quote = await self.get_quote(sym)
+                if quote is not None and quote.price is not None:
+                    return sym, Decimal(str(quote.price))
+            except MarketPriceRateLimitedError:
+                raise
+            except Exception as e:
+                logger.warning("Failed to fetch quote for %s during batch price fetch: %s", sym, e)
+            return sym, None
+
+        out: dict[str, Optional[Decimal]] = {}
         for i in range(0, len(unique), self._BATCH_CHUNK_SIZE):
             chunk = unique[i : i + self._BATCH_CHUNK_SIZE]
-            try:
-                chunk_prices = await asyncio.to_thread(self._download_prices_sync, chunk)
-            except _rate_limit_exception_types():
-                raise MarketPriceRateLimitedError(
-                    "Yahoo Finance rate-limited the batch price download"
-                )
-            out.update(chunk_prices)
+            results = await asyncio.gather(*[_fetch_one(s) for s in chunk])
+            out.update(dict(results))
         return out
 
     async def get_quote(self, symbol: str) -> Optional[MarketSymbolQuote]:
