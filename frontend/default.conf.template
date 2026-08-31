@@ -3,6 +3,24 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    # Prevent leaking internal port 8080 in redirects and hide Nginx version
+    server_tokens off;
+    port_in_redirect off;
+    absolute_redirect off;
+
+    # Global Security Headers
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https: blob:; connect-src 'self' https:; frame-ancestors 'none';" always;
+
+    # Normalize /api without trailing slash without port or scheme leakage
+    location = /api {
+        return 301 /api/;
+    }
+
     # API proxy to backend.
     # Resolve the backend hostname at request time via Docker's embedded DNS
     # instead of caching the IP at startup. Without this, Nginx pins the
@@ -17,12 +35,19 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+        proxy_set_header X-Forwarded-Host $host;
     }
 
     # Never cache index.html so new deployments are always picked up immediately
     location = /index.html {
         add_header Cache-Control "no-store, no-cache, must-revalidate";
+        add_header X-Frame-Options "DENY" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https: blob:; connect-src 'self' https:; frame-ancestors 'none';" always;
         try_files $uri =404;
     }
 

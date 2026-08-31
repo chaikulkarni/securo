@@ -102,8 +102,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.app_name,
-    openapi_url="/api/openapi.json",
-    docs_url="/api/docs",
+    openapi_url="/api/openapi.json" if (settings.debug or settings.docs_enabled) else None,
+    docs_url="/api/docs" if (settings.debug or settings.docs_enabled) else None,
+    redoc_url="/api/redoc" if (settings.debug or settings.docs_enabled) else None,
     lifespan=lifespan,
 )
 
@@ -114,6 +115,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    return response
 
 # Auth routes — custom login/logout with 2FA support (mounted first to take precedence)
 app.include_router(

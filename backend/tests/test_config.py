@@ -160,3 +160,13 @@ def test_local_auth_disabled_requires_complete_oidc_configuration(
             local_auth_enabled=False,
             _secrets_dir=str(secrets),
         )
+
+
+def test_docs_enabled_defaults_false(secrets: Path):
+    settings = Settings(_secrets_dir=str(secrets))
+    assert settings.docs_enabled is False
+
+
+def test_docs_enabled_can_be_set_true(secrets: Path):
+    settings = Settings(docs_enabled=True, _secrets_dir=str(secrets))
+    assert settings.docs_enabled is True

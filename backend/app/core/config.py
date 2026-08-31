@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     # App
     app_name: str = "Securo"
     debug: bool = False
+    docs_enabled: bool = False
 
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/securo"
