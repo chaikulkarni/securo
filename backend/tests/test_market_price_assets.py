@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 from typing import Optional
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import select
@@ -23,6 +24,7 @@ from app.models.user import User
 from app.providers.market_price import (
     MarketPriceProvider,
     MarketPriceRateLimitedError,
+    YFinanceProvider,
 )
 from app.schemas.asset import (
     AssetCreate,
